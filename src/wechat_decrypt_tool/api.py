@@ -20,6 +20,7 @@ request_logger = get_logger("wechat_decrypt_tool.request")
 from . import __version__ as APP_VERSION
 from .path_fix import PathFixRoute
 from .chat_realtime_autosync import CHAT_REALTIME_AUTOSYNC
+from .daily_report_service import DAILY_REPORT_SCHEDULER
 from .routers.chat import router as _chat_router
 from .routers.chat_contacts import router as _chat_contacts_router
 from .routers.chat_export import router as _chat_export_router
@@ -43,6 +44,7 @@ from .request_logging import log_server_errors_middleware
 from .wcdb_realtime import WCDB_REALTIME, shutdown as _wcdb_shutdown
 from .img_helper import IMG_HELPER
 from .routers.biz import router as _biz_router
+from .routers.daily_reports import router as _daily_reports_router
 from .routers.system import router as _system_router
 
 app = FastAPI(
@@ -92,6 +94,7 @@ app.include_router(_biz_router)
 app.include_router(_general_router)
 app.include_router(_favorites_router)
 app.include_router(_record_export_router)
+app.include_router(_daily_reports_router)
 app.include_router(_system_router)
 
 
@@ -192,12 +195,20 @@ async def _startup_background_jobs() -> None:
         CHAT_REALTIME_AUTOSYNC.start()
     except Exception:
         logger.exception("Failed to start realtime autosync service")
+    try:
+        DAILY_REPORT_SCHEDULER.start()
+    except Exception:
+        logger.exception("Failed to start daily report scheduler")
 
 
 @app.on_event("shutdown")
 async def _shutdown_wcdb_realtime() -> None:
     try:
         CHAT_REALTIME_AUTOSYNC.stop()
+    except Exception:
+        pass
+    try:
+        DAILY_REPORT_SCHEDULER.stop()
     except Exception:
         pass
     

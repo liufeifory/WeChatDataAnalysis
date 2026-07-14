@@ -2,6 +2,7 @@ import atexit
 import ctypes
 import base64
 import binascii
+import hashlib
 import json
 import os
 import re
@@ -1244,6 +1245,57 @@ def get_messages(handle: int, username: str, *, limit: int = 50, offset: int = 0
                 out.append(x)
         return out
     return []
+
+
+def get_messages_by_time(
+    handle: int,
+    username: str,
+    *,
+    db_path: str | Path,
+    start_time: int,
+    end_time: int,
+    limit: int = 200,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    _ensure_initialized()
+    u = str(username or "").strip()
+    if not u:
+        return []
+
+    db_path_str = str(db_path or "").strip()
+    if not db_path_str:
+        raise WCDBRealtimeError("Missing db_path for get_messages_by_time.")
+
+    md5_hex = hashlib.md5(u.encode("utf-8")).hexdigest()
+    table_name = f"msg_{md5_hex}"
+    st = max(0, int(start_time or 0))
+    et = max(0, int(end_time or 0))
+    lim = max(1, int(limit or 0))
+    off = max(0, int(offset or 0))
+
+    sql = f'''
+SELECT
+    m.local_id AS local_id,
+    m.server_id AS server_id,
+    m.local_type AS local_type,
+    COALESCE(m.sort_seq, 0) AS sort_seq,
+    m.real_sender_id AS real_sender_id,
+    m.create_time AS create_time,
+    m.message_content AS message_content,
+    m.compress_content AS compress_content,
+    m.packed_info_data AS packed_info_data,
+    n.user_name AS sender_username
+FROM "{table_name}" AS m
+LEFT JOIN Name2Id AS n ON n.rowid = m.real_sender_id
+WHERE m.create_time >= {st} AND m.create_time < {et}
+ORDER BY m.create_time ASC, COALESCE(m.sort_seq, 0) ASC, m.local_id ASC
+LIMIT {lim} OFFSET {off}
+'''.strip()
+
+    try:
+        return exec_query(handle, kind="message", path=db_path_str, sql=sql)
+    except Exception as exc:
+        raise WCDBRealtimeError(f"get_messages_by_time failed for {u}: {exc}") from exc
 
 
 def get_message_count(handle: int, username: str) -> int:
