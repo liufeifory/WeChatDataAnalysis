@@ -206,6 +206,35 @@
         </div>
       </div>
 
+      <!-- Report Classification -->
+      <div
+        class="sidebar-rail-action w-full h-[var(--sidebar-rail-step)] flex items-center justify-center cursor-pointer group"
+        title="日报归类"
+        @click="goReportClassification"
+      >
+        <div class="sidebar-rail-plate w-[var(--sidebar-rail-btn)] h-[var(--sidebar-rail-btn)] rounded-md flex items-center justify-center transition-colors bg-transparent">
+          <div class="sidebar-rail-icon w-[var(--sidebar-rail-icon)] h-[var(--sidebar-rail-icon)]" :class="{ 'sidebar-rail-icon-active': isReportClassificationRoute }">
+            <svg
+              class="w-full h-full"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M9 6h11" />
+              <path d="M9 12h11" />
+              <path d="M9 18h11" />
+              <path d="M4 6h.01" />
+              <path d="M4 12h.01" />
+              <path d="M4 18h.01" />
+            </svg>
+          </div>
+        </div>
+      </div>
+
       <!-- Export -->
       <div
         v-if="showGlobalExportEntry"
@@ -736,6 +765,7 @@ const isMiniProgramsRoute = computed(() => route.path?.startsWith('/mini-program
 const isFinderRoute = computed(() => route.path?.startsWith('/finder'))
 const isPaymentsRoute = computed(() => route.path?.startsWith('/payments'))
 const isWrappedRoute = computed(() => route.path?.startsWith('/wrapped'))
+const isReportClassificationRoute = computed(() => route.path?.startsWith('/report-classification'))
 
 const goChat = async () => { await navigateTo('/chat') }
 const goEdits = async () => { await navigateTo('/edits') }
@@ -747,6 +777,7 @@ const goMiniPrograms = async () => { await navigateTo('/mini-programs') }
 const goFinder = async () => { await navigateTo('/finder') }
 const goPayments = async () => { await navigateTo('/payments') }
 const goWrapped = async () => { await navigateTo('/wrapped') }
+const goReportClassification = async () => { await navigateTo('/report-classification') }
 const goGuide = async () => { await navigateTo('/') }
 const goSettings = () => { openSettingsDialog() }
 

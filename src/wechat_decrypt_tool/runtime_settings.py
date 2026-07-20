@@ -228,6 +228,34 @@ def reset_mcp_token() -> str:
     return token
 
 
+_LLM_CONFIG_ENV_TO_KEY = {
+    "WECHAT_TOOL_DAILY_REPORT_ENABLED": "enabled",
+    "WECHAT_TOOL_DAILY_REPORT_TIME": "schedule_time",
+    "WECHAT_TOOL_DAILY_REPORT_LLM_BASE_URL": "llm_base_url",
+    "WECHAT_TOOL_DAILY_REPORT_LLM_API_KEY": "llm_api_key",
+    "WECHAT_TOOL_DAILY_REPORT_LLM_MODEL": "llm_model",
+    "WECHAT_TOOL_DAILY_REPORT_ACCOUNT": "account",
+}
+
+
+def read_effective_daily_report_llm_config() -> dict[str, str]:
+    """Return merged LLM config for daily reports from env vars + runtime settings.
+
+    Env vars take precedence over stored runtime settings.
+    """
+    settings = _read_runtime_settings()
+    out: dict[str, str] = {}
+    for env_key, config_key in _LLM_CONFIG_ENV_TO_KEY.items():
+        env_val = str(os.environ.get(env_key, "") or "").strip()
+        if env_val:
+            out[config_key] = env_val
+        else:
+            val = settings.get(config_key)
+            if val is not None:
+                out[config_key] = str(val)
+    return out
+
+
 def get_env_file_path() -> Path | None:
     """Best-effort env file path for `uv run` (defaults to repo root `.env`)."""
 

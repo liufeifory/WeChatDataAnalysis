@@ -45,6 +45,7 @@ from .wcdb_realtime import WCDB_REALTIME, shutdown as _wcdb_shutdown
 from .img_helper import IMG_HELPER
 from .routers.biz import router as _biz_router
 from .routers.daily_reports import router as _daily_reports_router
+from .routers.daily_report_classification import router as _daily_report_classification_router
 from .routers.system import router as _system_router
 
 app = FastAPI(
@@ -92,6 +93,7 @@ app.include_router(_general_router)
 app.include_router(_favorites_router)
 app.include_router(_record_export_router)
 app.include_router(_daily_reports_router)
+app.include_router(_daily_report_classification_router)
 app.include_router(_system_router)
 
 

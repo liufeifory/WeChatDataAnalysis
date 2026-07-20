@@ -27,6 +27,7 @@ from .chat_helpers import (
     _split_group_sender_prefix,
 )
 from .logging_config import get_logger
+from .daily_report_classification_store import find_daily_report_rule
 from .wcdb_realtime import (
     WCDB_REALTIME,
     WCDBRealtimeError,
@@ -263,6 +264,101 @@ def _diag_conversation_entry(date_str: str, entry: dict[str, Any]) -> bool:
         str(entry.get("username") or ""),
         str(entry.get("display_name") or ""),
     )
+
+
+def _summarize_rule_matched_conversation(conv: dict, rule: dict[str, Any]) -> str:
+    messages = conv.get("messages") or []
+    lines: list[str] = []
+    for item in messages:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        # Strip the first sender label prefix (format: "xxx: message")
+        sep = text.find(":")
+        if sep > 0:
+            text = text[sep + 1 :].strip()
+        if not text:
+            continue
+        # Replace newlines with space for summary conciseness
+        text = text.replace("\n", " ").replace("\r", " ").strip()
+        # Remove leading wxid_ / @ mention patterns from group chat context
+        text = re.sub(r"^wxid_\S+\s*", "", text).strip()
+        text = re.sub(r"^@\S+\s*", "", text).strip()
+        if not text:
+            continue
+        lines.append(text)
+    tail = [line for line in lines[-2:] if line]
+    if tail:
+        summary = "；".join(tail)
+        return summary[:30]
+
+    category = str(rule.get("category") or "").strip()
+    customer_name = str(rule.get("customer_name") or "").strip()
+    display_name = str(conv.get("display_name") or "").strip()
+    note = str(rule.get("note") or "").strip()
+    if category == "customer":
+        return f"与{customer_name or display_name}沟通{note or '相关事项'}"[:30]
+    return f"处理{display_name or customer_name or '内部工作'}相关事项"[:30]
+
+
+def _apply_manual_classification_rules(conversations: list[dict], *, date_str: str = "") -> tuple[list[dict], list[dict]]:
+    manual_entries: list[dict] = []
+    remaining: list[dict] = []
+
+    for conv in conversations:
+        username = str(conv.get("username") or "")
+        rule = find_daily_report_rule(username)
+        if not rule:
+            if date_str and _should_diag_conversation(date_str, username, str(conv.get("display_name") or "")):
+                logger.info(
+                    "[daily-report][diag][rule] stage=miss date=%s username=%s display_name=%s",
+                    date_str,
+                    username,
+                    conv.get("display_name") or "",
+                )
+            remaining.append(conv)
+            continue
+
+        category = str(rule.get("category") or "").strip()
+        if date_str and _should_diag_conversation(date_str, username, str(conv.get("display_name") or "")):
+            logger.info(
+                "[daily-report][diag][rule] stage=hit date=%s username=%s display_name=%s category=%s",
+                date_str,
+                username,
+                conv.get("display_name") or "",
+                category,
+            )
+        if category == "ignore":
+            if date_str and _should_diag_conversation(date_str, username, str(conv.get("display_name") or "")):
+                logger.info(
+                    "[daily-report][diag][rule] stage=ignored date=%s username=%s display_name=%s",
+                    date_str,
+                    username,
+                    conv.get("display_name") or "",
+                )
+            continue
+
+        entry = {
+            "username": username,
+            "display_name": conv.get("display_name") or "",
+            "is_group": bool(conv.get("is_group")),
+            "is_customer": True,
+            "customer_name": str(rule.get("customer_name") or "") if category == "customer" else "",
+            "customer_id": str(rule.get("customer_id") or "") if category == "customer" else "",
+            "category": category,
+            "summary": _summarize_rule_matched_conversation(conv, rule),
+        }
+        if date_str and _should_diag_conversation(date_str, username, str(conv.get("display_name") or "")):
+            logger.info(
+                "[daily-report][diag][rule] stage=append_manual date=%s username=%s display_name=%s category=%s summary=%s",
+                date_str,
+                username,
+                conv.get("display_name") or "",
+                category,
+                entry.get("summary") or "",
+            )
+        manual_entries.append(entry)
+    return manual_entries, remaining
 
 
 def _collect_account_day_messages(account_dir: Path, date_str: str) -> list[dict]:
@@ -878,42 +974,33 @@ def _sqlite_sender_matches_self(
 
 # ── LLM analysis ──────────────────────────────────────────────────────────
 
-_LLM_SYSTEM_PROMPT = """你是一个微信工作日报分析助手。你的任务是分析今日的聊天记录，识别出应该计入工作日报的对话。
-
-核心原则：
-- 只要是实际工作相关沟通，就必须计入日报
-- 不要把“内部群”当作排除条件
-- 不要只盯“客户咨询”，内部技术支援、项目实施、运维排障同样属于日报工作内容
-
-必须计入日报（直接判定为 is_customer=true）的典型场景：
-- 内部技术支援群、项目群、实施群、维护群、运维群、排障群
-- 数据库相关沟通：SQL、索引、备份、恢复、迁移、升级、主备、容灾、巡检、性能优化
-- 服务器/系统相关沟通：部署、配置、故障、修复、切换、上线、补丁、日志排查
-- 医院/客户项目交付、培训、答疑、问题处理、远程协助
-- 只要聊天内容明显是在处理工作事务，并且出现了实际问题分析、方案确认、操作安排、结果反馈，就应计入日报
-
-不计入日报：
-- 朋友闲聊、家庭群聊、兴趣群讨论、广告推销、纯娱乐闲聊等与工作无关内容
-
-强规则：
-- 如果群名或内容出现“技术支援、维护、实施、运维、排障、数据库、SQL、索引、备份、恢复、迁移、升级、主备、容灾、巡检、部署、配置、故障、服务器、培训、答疑、项目、医院、系统”等工作关键词，且聊天内容明显在处理工作事务，就必须标记为 is_customer=true
-- 不要因为群名包含“内部”或因为参与者是同事，就判定为 false
-- 对于内部技术支援群、数据库问题群、医院维护群、项目实施群，只要内容是实际工作处理，必须进入日报
-
-对于每一段对话，请判断：
-1. is_customer: 是否应计入工作日报（true/false）。这里表示“是否属于日报工作内容”，不只表示“客户”
-2. customer_name: 工作对象名称（客户名、医院名、项目名、群名、系统名、人名等）。如果是内部技术支援群、项目群、维护群，可直接填写群名或项目名
-3. summary: 用一句话概括核心结果，突出关键动作和产出（10-25字，仅对 should-report=true 的对话填写，其他留空）。要求直击重点，不罗列过程细节，让人一眼看明白今天做了什么
-
-请严格按以下 JSON 格式返回结果，不要包含其他内容：
-{"entries": [{"username": "...", "is_customer": true/false, "customer_name": "...", "summary": "..."}, ...]}
-
-特别注意：
-- 内部技术支援群、数据库问题群、医院维护群、项目实施群，只要当天讨论的是数据库、运维、排障、实施、系统处理等实际工作，就必须计入日报
-- 所有群聊名称包含"相亲"的对话已经被过滤掉，你不需要再考虑"""
+_LLM_SYSTEM_PROMPT = ('你是一个微信工作日报摘要助手。你的任务是为今日的聊天记录生成工作摘要。\n\n'
+    + '消息已经按【客户名称】分组展示，同一客户下的多个群聊/私聊属于同一工作对象。\n'
+    + '对于【其他未分类】中的对话，只对实际工作沟通生成摘要，非工作内容留空。\n\n'
+    + '对于每一段对话：\n'
+    + '1. customer_name: 工作对象名称。如果消息属于某客户名称分组，直接填写该客户名称；其他未分类的且属于工作内容，填写医院名、项目名、群名或人名\n'
+    + '2. is_customer: 标记为 true（所有发送给你的对话都已提前筛选，只需生成摘要）\n'
+    + '3. summary: 用一句话概括核心结果，突出关键动作和产出（10-25字），要求直击重点，不罗列过程细节。如果确实不是工作内容，留空\n\n'
+    + '请严格按以下 JSON 格式返回结果，不要包含其他内容：\n'
+    + '{"entries": [{"username": "...", "is_customer": true, "customer_name": "...", "summary": "..."}, ...]}')
 
 
-def _build_llm_user_message(conversations: list[dict]) -> str:
+def _build_llm_user_message(conversations: list[dict], *, groups: dict[str, list[dict]] | None = None) -> str:
+    if groups:
+        parts: list[str] = []
+        for group_name, group_conv in groups.items():
+            label = f"【{group_name}】"
+            parts.append(label)
+            for conv in group_conv:
+                tag = "群聊" if conv.get("is_group") else "私聊"
+                header = f"[{tag}] {conv.get('display_name', '')} ({conv.get('username', '')})"
+                parts.append(header)
+                for msg in (conv.get("messages") or []):
+                    parts.append(f"  {msg}")
+                parts.append("")
+            parts.append("")
+        return "\n".join(parts)
+
     parts: list[str] = []
     for conv in conversations:
         tag = "群聊" if conv["is_group"] else "私聊"
@@ -971,6 +1058,7 @@ async def _analyze_conversations_with_llm(
     config: DailyReportConfig,
     *,
     date_str: str = "",
+    groups: dict[str, list[dict]] | None = None,
 ) -> tuple[list[dict], bool]:
     """Send conversations to LLM and return analyzed results.
 
@@ -986,7 +1074,7 @@ async def _analyze_conversations_with_llm(
         "Content-Type": "application/json",
     }
 
-    user_msg = _build_llm_user_message(conversations)
+    user_msg = _build_llm_user_message(conversations, groups=groups)
     # Guard against overly long prompts.
     if len(user_msg) > 50000:
         user_msg = user_msg[:50000] + "\n...(truncated)"
@@ -1094,8 +1182,9 @@ def _merge_entries_by_customer(entries: list[dict], *, date_str: str = "") -> li
     merged: dict[str, dict] = {}
     others: list[dict] = []
     for e in entries:
+        category = str(e.get("category") or "").strip()
         cn = (e.get("customer_name") or "").strip()
-        if not cn:
+        if category != "customer" or not cn:
             others.append(e)
             if date_str and _diag_conversation_entry(date_str, e):
                 logger.info(
@@ -1110,16 +1199,13 @@ def _merge_entries_by_customer(entries: list[dict], *, date_str: str = "") -> li
             continue
         if cn in merged:
             existing = merged[cn]
-            # Merge summary
             existing_summaries = [s.strip() for s in (existing["summary"] or "").split("；") if s.strip()]
             current_summary = e.get("summary") or ""
             if current_summary.strip() and current_summary not in existing_summaries:
                 existing_summaries.append(current_summary.strip())
             existing["summary"] = "；".join(existing_summaries)
-            # Merge is_customer (True wins)
             if e.get("is_customer"):
                 existing["is_customer"] = True
-            # Merge display_name to show both sources
             existing_display = existing.get("display_name") or ""
             current_display = e.get("display_name") or ""
             if current_display and current_display not in existing_display:
@@ -1183,12 +1269,48 @@ async def generate_daily_report(
             len(conversations),
         )
 
-        # Step 2: LLM analysis.
-        analyzed, llm_analyzed = await _analyze_conversations_with_llm(
+        manual_entries, remaining_conversations = _apply_manual_classification_rules(
             conversations,
-            config,
             date_str=date_str,
         )
+        if manual_entries:
+            logger.info(
+                "[daily-report] Applied %d manual classification entries for %s",
+                len(manual_entries),
+                date_str,
+            )
+        if _diag_target_keyword() and (_diag_target_date() in {"", date_str}):
+            logger.info(
+                "[daily-report][diag][rule] stage=split date=%s manual_entries=%d remaining_conversations=%d",
+                date_str,
+                len(manual_entries),
+                len(remaining_conversations),
+            )
+
+        # Step 2: group remaining conversations by customer for LLM context.
+        llm_groups: dict[str, list[dict]] = {}
+        for conv in remaining_conversations:
+            rule = find_daily_report_rule(str(conv.get("username") or ""))
+            if rule and str(rule.get("category") or "").strip() == "customer":
+                group_name = str(rule.get("customer_name") or "").strip()
+                if group_name:
+                    llm_groups.setdefault(group_name, []).append(conv)
+                    continue
+            llm_groups.setdefault("其他未分类", []).append(conv)
+        if len(llm_groups) > 1:
+            logger.info(
+                "[daily-report] LLM prompt grouped by customer: %d groups",
+                len(llm_groups),
+            )
+
+        # Step 2: LLM analysis.
+        analyzed, llm_analyzed = await _analyze_conversations_with_llm(
+            remaining_conversations,
+            config,
+            date_str=date_str,
+            groups=llm_groups,
+        )
+        analyzed = manual_entries + analyzed
 
         # Step 2b: merge entries for the same customer (同一客户既在群聊又在私聊时合并为一条).
         analyzed = _merge_entries_by_customer(analyzed, date_str=date_str)
