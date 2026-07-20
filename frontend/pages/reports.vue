@@ -243,42 +243,60 @@
           </template>
         </div>
 
-        <!-- filter tabs -->
-        <div class="mb-3 flex items-center gap-2">
-          <button
-            type="button"
-            class="rounded-full px-3 py-1 text-[11px] font-medium border transition"
-            :class="filterMode === 'all'
-              ? 'text-white bg-[#07C160] border-[#07C160]'
-              : ''"
-            :style="filterMode !== 'all' ? { borderColor: 'var(--sidebar-rail-border)', color: 'var(--sidebar-rail-icon-active-color)' } : {}"
-            @click="filterMode = 'all'"
-          >
-            全部 ({{ localEntries.length }})
-          </button>
-          <button
-            type="button"
-            class="rounded-full px-3 py-1 text-[11px] font-medium border transition"
-            :class="filterMode === 'customer'
-              ? 'text-white bg-[#07C160] border-[#07C160]'
-              : ''"
-            :style="filterMode !== 'customer' ? { borderColor: 'var(--sidebar-rail-border)', color: 'var(--sidebar-rail-icon-active-color)' } : {}"
-            @click="filterMode = 'customer'"
-          >
-            客户 ({{ customerCount }})
-          </button>
-          <button
-            type="button"
-            class="rounded-full px-3 py-1 text-[11px] font-medium border transition"
-            :class="filterMode === 'other'
-              ? 'text-white bg-gray-400 border-gray-400'
-              : ''"
-            :style="filterMode !== 'other' ? { borderColor: 'var(--sidebar-rail-border)', color: 'var(--sidebar-rail-icon-color)' } : {}"
-            @click="filterMode = 'other'"
-          >
-            其他 ({{ nonCustomerCount }})
-          </button>
-        </div>
+          <div class="mb-3 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="rounded-full px-3 py-1 text-[11px] font-medium border transition"
+                :class="filterMode === 'all'
+                  ? 'text-white bg-[#07C160] border-[#07C160]'
+                  : ''"
+                :style="filterMode !== 'all' ? { borderColor: 'var(--sidebar-rail-border)', color: 'var(--sidebar-rail-icon-active-color)' } : {}"
+                @click="filterMode = 'all'"
+              >
+                全部 ({{ localEntries.length }})
+              </button>
+              <button
+                type="button"
+                class="rounded-full px-3 py-1 text-[11px] font-medium border transition"
+                :class="filterMode === 'customer'
+                  ? 'text-white bg-[#07C160] border-[#07C160]'
+                  : ''"
+                :style="filterMode !== 'customer' ? { borderColor: 'var(--sidebar-rail-border)', color: 'var(--sidebar-rail-icon-active-color)' } : {}"
+                @click="filterMode = 'customer'"
+              >
+                客户 ({{ customerCount }})
+              </button>
+              <button
+                type="button"
+                class="rounded-full px-3 py-1 text-[11px] font-medium border transition"
+                :class="filterMode === 'internal'
+                  ? 'text-white bg-blue-500 border-blue-500'
+                  : ''"
+                :style="filterMode !== 'internal' ? { borderColor: 'var(--sidebar-rail-border)', color: 'var(--sidebar-rail-icon-active-color)' } : {}"
+                @click="filterMode = 'internal'"
+              >
+                内部工作 ({{ internalCount }})
+              </button>
+              <button
+                type="button"
+                class="rounded-full px-3 py-1 text-[11px] font-medium border transition"
+                :class="filterMode === 'other'
+                  ? 'text-white bg-gray-400 border-gray-400'
+                  : ''"
+                :style="filterMode !== 'other' ? { borderColor: 'var(--sidebar-rail-border)', color: 'var(--sidebar-rail-icon-color)' } : {}"
+                @click="filterMode = 'other'"
+              >
+                其他 ({{ nonCustomerCount }})
+              </button>
+            </div>
+            <button
+              type="button"
+              class="rounded-lg border px-3 py-1.5 text-[12px] font-medium transition hover:bg-[#f5f5f5]"
+              :style="{ borderColor: 'var(--sidebar-rail-border)', color: 'var(--sidebar-rail-icon-active-color)' }"
+              @click="goClassificationPage"
+            >管理归类规则</button>
+          </div>
 
         <!-- entries -->
         <div class="space-y-2.5">
@@ -296,13 +314,9 @@
                     <button
                       type="button"
                       class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium leading-none border transition"
-                      :class="entry.is_customer
-                        ? 'bg-green-100 text-green-700 border-green-200'
-                        : ''"
-                      :style="!entry.is_customer ? { backgroundColor: 'var(--sidebar-rail-bg)', color: 'var(--sidebar-rail-icon-color)', borderColor: 'transparent' } : {}"
-                      @click="toggleCustomer(i, entry._key)"
+                      :class="categoryBadgeClass(entry)"
                     >
-                      {{ entry.is_customer ? '客户' : '其他' }}
+                      {{ categoryLabel(entry) }}
                     </button>
                   </div>
                   <div class="mt-1">
@@ -311,7 +325,8 @@
                       :value="entry.customer_name"
                       class="inline-block min-w-[120px] rounded border px-1.5 py-0.5 text-[12px] outline-none transition focus:border-[#07C160]"
                       :style="{ borderColor: 'var(--sidebar-rail-border)', color: 'var(--sidebar-rail-icon-active-color)', backgroundColor: 'var(--sidebar-rail-bg)' }"
-                      placeholder="点击输入客户名称"
+                      :placeholder="entry.category === 'customer' ? '客户名称' : '非客户类可留空'"
+                      :disabled="entry.category !== 'customer'"
                       @input="onUpdateEntry(i, entry._key, 'customer_name', $event.target.value)"
                     />
                   </div>
@@ -491,7 +506,7 @@ const saving = ref(false)
 const saveSuccess = ref('')
 const saveError = ref('')
 const showAddForm = ref(false)
-const newEntry = ref({ display_name: '', customer_name: '', summary: '', is_customer: true })
+const newEntry = ref({ display_name: '', customer_name: '', customer_id: '', summary: '', is_customer: true, category: 'customer' })
 let saveSuccessTimer = null
 
 // ── local entry cache (mirror of report entries for editing) ──
@@ -501,6 +516,8 @@ function _syncLocalEntries() {
   if (!report.value) { localEntries.value = []; return }
   _keyCounter = 0
   localEntries.value = (report.value.entries || []).map(e => ({
+    category: e.category || (e.is_customer ? 'customer' : 'ignore'),
+    customer_id: e.customer_id || '',
     ...e,
     _key: `e_${_keyCounter++}`,
   }))
@@ -510,18 +527,40 @@ function _nextKey() {
 }
 
 // ── computed ──
-const customerCount = computed(() => localEntries.value.filter(e => e.is_customer).length)
-const nonCustomerCount = computed(() => localEntries.value.filter(e => !e.is_customer).length)
+const customerCount = computed(() => localEntries.value.filter(e => e.category === 'customer').length)
+const internalCount = computed(() => localEntries.value.filter(e => e.category === 'internal').length)
+const nonCustomerCount = computed(() => localEntries.value.filter(e => e.category !== 'customer' && e.category !== 'internal').length)
 
 const filteredEntries = computed(() => {
-  if (filterMode.value === 'customer') return localEntries.value.filter(e => e.is_customer)
-  if (filterMode.value === 'other') return localEntries.value.filter(e => !e.is_customer)
+  if (filterMode.value === 'customer') return localEntries.value.filter(e => e.category === 'customer')
+  if (filterMode.value === 'internal') return localEntries.value.filter(e => e.category === 'internal')
+  if (filterMode.value === 'other') return localEntries.value.filter(e => e.category !== 'customer' && e.category !== 'internal')
   return localEntries.value
 })
 
 // ── helpers ──
 function openSettings() {
   settingsDialog.openDialog()
+}
+
+function goClassificationPage() {
+  navigateTo('/report-classification')
+}
+
+function categoryLabel(entry) {
+  const category = entry?.category || (entry?.is_customer ? 'customer' : 'ignore')
+  if (category === 'customer') return '客户'
+  if (category === 'internal') return '内部工作'
+  if (category === 'ignore') return '忽略'
+  return '其他'
+}
+
+function categoryBadgeClass(entry) {
+  const category = entry?.category || (entry?.is_customer ? 'customer' : 'ignore')
+  if (category === 'customer') return 'bg-green-100 text-green-700 border-green-200'
+  if (category === 'internal') return 'bg-blue-100 text-blue-700 border-blue-200'
+  if (category === 'ignore') return 'bg-gray-100 text-gray-500 border-gray-200'
+  return 'bg-gray-100 text-gray-500 border-gray-200'
 }
 
 function formatTime(ts) {
@@ -573,9 +612,15 @@ function submitNewEntry() {
   entry.display_name = entry.display_name.trim() || entry.summary.trim()
   entry.is_group = false
   entry.username = ''
+  entry.category = entry.category || 'customer'
+  entry.is_customer = entry.category === 'customer' || entry.category === 'internal'
+  if (entry.category !== 'customer') {
+    entry.customer_name = ''
+    entry.customer_id = ''
+  }
   entry._key = _nextKey()
   localEntries.value.push(entry)
-  newEntry.value = { display_name: '', customer_name: '', summary: '', is_customer: true }
+  newEntry.value = { display_name: '', customer_name: '', customer_id: '', summary: '', is_customer: true, category: 'customer' }
   showAddForm.value = false
 }
 

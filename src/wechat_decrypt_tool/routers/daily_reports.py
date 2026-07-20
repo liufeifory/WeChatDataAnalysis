@@ -23,6 +23,8 @@ class ReportEntry(BaseModel):
     display_name: str = ""
     is_group: bool = False
     is_customer: bool = False
+    category: str = ""
+    customer_id: str = ""
     customer_name: str = ""
     summary: str = ""
 

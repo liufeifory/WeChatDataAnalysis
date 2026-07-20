@@ -816,12 +816,54 @@ export const useApi = () => {
       body: { enabled: !!enabled }
     })
   }
+  const getDailyReportClassification = async () => {
+    return await request('/daily-report-classification')
+  }
+
+  const updateDailyReportClassificationCustomers = async (customers = []) => {
+    return await request('/daily-report-classification/customers', {
+      method: 'PUT',
+      body: { customers },
+    })
+  }
+
+  const createDailyReportClassificationRule = async (rule = {}) => {
+    return await request('/daily-report-classification/rules', {
+      method: 'POST',
+      body: { rule },
+    })
+  }
+
+  const updateDailyReportClassificationRule = async (ruleId, rule = {}) => {
+    return await request(`/daily-report-classification/rules/${encodeURIComponent(ruleId)}`, {
+      method: 'PUT',
+      body: { rule },
+    })
+  }
+
+  const deleteDailyReportClassificationRule = async (ruleId) => {
+    return await request(`/daily-report-classification/rules/${encodeURIComponent(ruleId)}`, {
+      method: 'DELETE',
+    })
+  }
+
+  const listDailyReportClassificationCandidates = async (params = {}) => {
+    const query = new URLSearchParams()
+    if (params && params.limit != null) query.set('limit', String(params.limit))
+    return await request('/daily-report-classification/candidates' + (query.toString() ? `?${query.toString()}` : ''))
+  }
 
 
   return {
     pickSystemDirectory,
     getImgHelperStatus,
     toggleImgHelper,
+    getDailyReportClassification,
+    updateDailyReportClassificationCustomers,
+    createDailyReportClassificationRule,
+    updateDailyReportClassificationRule,
+    deleteDailyReportClassificationRule,
+    listDailyReportClassificationCandidates,
     detectWechat,
     detectCurrentAccount,
     decryptDatabase,
